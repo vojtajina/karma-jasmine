@@ -145,12 +145,24 @@ var KarmaReporter = function(tc) {
   this.log = function() {};
 };
 
+var lastSpecIdForBrowser = function(browserId) {
+  return 750 * browserId  ;
+  return 2300 * browserId  - 200 * Math.pow(browserId, 2);
+};
 
 var createStartFn = function(tc, jasmineEnvPassedIn) {
   return function(config) {
     // we pass jasmineEnv during testing
     // in production we ask for it lazily, so that adapter can be loaded even before jasmine
     var jasmineEnv = jasmineEnvPassedIn || window.jasmine.getEnv();
+    var browserId = parseInt(window.parent.location.search.match(/id=(.*)/)[1], 10);
+    var firstId = lastSpecIdForBrowser(browserId - 1);
+    var lastId = lastSpecIdForBrowser(browserId);
+
+    // run only the subset of tests for this browser
+    jasmineEnv.specFilter = function(spec) {
+      return firstId <= spec.id && spec.id < lastId;
+    };
 
     jasmineEnv.addReporter(new KarmaReporter(tc));
     jasmineEnv.execute();
