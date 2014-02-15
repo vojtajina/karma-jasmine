@@ -33,25 +33,51 @@ var indexOf = function(collection, item) {
 };
 
 
-var SuiteNode = function(result, parent) {
-  this.result = result;
+var SuiteNode = function(name, parent) {
+  this.name = name;
   this.parent = parent;
   this.children = [];
 
-  this.addChild = function(result) {
-    this.children.push(new SuiteNode(result, this));
-  };
-
-  this.lastChild = function() {
-    return this.children[ this.children.length - 1 ];
+  this.addChild = function(name) {
+    var suite = new SuiteNode(name, this);
+    this.children.push(suite);
+    return suite;
   };
 };
 
 
+var getAllSpecNames = function(topSuite) {
+  var specNames = {};
+
+  function processSuite(suite, pointer) {
+    var child;
+    var childPointer;
+
+    for (var i = 0; i < suite.children.length; i++) {
+      child = suite.children[i];
+
+      if (child.children) {
+        childPointer = pointer[child.description] = {_: []};
+        processSuite(child, childPointer);
+      } else {
+        pointer._.push(child.description);
+      }
+    }
+  }
+
+  processSuite(topSuite, specNames);
+
+  return specNames;
+};
+
+
 /**
- * Very simple reporter for jasmine
+ * Very simple reporter for Jasmine.
  */
 var KarmaReporter = function(tc, jasmineEnv) {
+
+  var currentSuite = new SuiteNode();
+
   /**
    * Jasmine 2.0 dispatches the following events:
    *
@@ -62,33 +88,15 @@ var KarmaReporter = function(tc, jasmineEnv) {
    *  - specStarted
    *  - specDone
    */
-  function getAllSpecNames() {
-    var specNames = {};
-
-    function processSuite(suite, pointer) {
-      var child;
-      var childPointer;
-
-      for (var i = 0; i < suite.children.length; i++) {
-        child = suite.children[i];
-
-        if (child.children) {
-          childPointer = pointer[child.description] = {_: []};
-          processSuite(child, childPointer);
-        } else {
-          pointer._.push(child.description);
-        }
-      }
-    }
-
-    processSuite(jasmineEnv.topSuite(), specNames);
-
-    return specNames;
-  }
 
   this.jasmineStarted = function(data) {
-    tc.info({ total: data.totalSpecsDefined, specs: getAllSpecNames() });
+    // TODO(vojta): Do not send spec names when polling.
+    tc.info({
+      total: data.totalSpecsDefined,
+      specs: getAllSpecNames(jasmineEnv.topSuite())
+    });
   };
+
 
   this.jasmineDone = function() {
     tc.complete({
@@ -97,18 +105,15 @@ var KarmaReporter = function(tc, jasmineEnv) {
   };
 
 
-  var rootSuite = new SuiteNode({}, null),
-      currentSuite = rootSuite;
-
-
-  this.suiteStarted = function(result){
-    currentSuite.addChild(result);
-    currentSuite = currentSuite.lastChild();
+  this.suiteStarted = function(result) {
+    currentSuite = currentSuite.addChild(result);
   };
 
 
-  this.suiteDone = function(result){
-    if (currentSuite === rootSuite || currentSuite.result.description !== result.description) {
+  this.suiteDone = function(result) {
+    // In the case of xdescribe, only "suiteDone" is fired.
+    // We need to skip that.
+    if (result.description !== currentSuite.name) {
       return;
     }
 
@@ -117,7 +122,7 @@ var KarmaReporter = function(tc, jasmineEnv) {
 
 
   this.specStarted = function(specResult) {
-    specResult.time = new Date().getTime();
+    specResult.startTime = new Date().getTime();
   };
 
 
@@ -131,27 +136,26 @@ var KarmaReporter = function(tc, jasmineEnv) {
       skipped     : skipped,
       success     : specResult.failedExpectations.length === 0,
       suite       : [],
-      time        : skipped ? 0 : new Date().getTime() - specResult.time
+      time        : skipped ? 0 : new Date().getTime() - specResult.startTime
     };
 
     // generate ordered list of (nested) suite names
     var suitePointer = currentSuite;
-    while(suitePointer.result.description){
-      result.suite.unshift(suitePointer.result.description);
+    while (suitePointer.parent) {
+      result.suite.unshift(suitePointer.name);
       suitePointer = suitePointer.parent;
     }
 
     if (!result.success) {
       var steps = specResult.failedExpectations;
       for (var i = 0, l = steps.length; i < l; i++) {
-        result.log.push( formatFailedStep(steps[i]) );
+        result.log.push(formatFailedStep(steps[i]));
       }
     }
 
     tc.result(result);
-    delete specResult.time;
+    delete specResult.startTime;
   };
-
 };
 
 
@@ -161,7 +165,7 @@ var createStartFn = function(tc, jasmineEnvPassedIn) {
     // in production we ask for it lazily, so that adapter can be loaded even before jasmine
     var jasmineEnv = jasmineEnvPassedIn || window.jasmine.getEnv();
 
-    jasmineEnv.addReporter( new KarmaReporter(tc, jasmineEnv) );
+    jasmineEnv.addReporter(new KarmaReporter(tc, jasmineEnv));
     jasmineEnv.execute();
   };
 };
